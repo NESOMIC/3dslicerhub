@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deploy-{{container_name}}
+  labels:
+    app: {{app_label}}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app-user: {{container_name}}
+  template:
+    metadata:
+      labels:
+        app: {{app_label}}
+        app-user: {{container_name}}
+    spec:
+      volumes:
+        # Qt/VTK use shared memory for the X transport; the 64Mi a container gets by default makes
+        # 3D Slicer crash or draw garbage (docker run needs --shm-size=512m for the same reason).
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
+{{container_vols}}
+      containers:
+      - name: {{container_name}}
+        image: {{image_name}}
+        imagePullPolicy: {{image_pull_policy}}
+        lifecycle:
+          postStart:
+            exec:
+              command: ["/bin/sh", "-c", "{{patches}}"]
+        securityContext:
+          runAsUser: 0
+        resources:
+{{limits}}
+          requests:
+{{cpu_requested}}
+        env:
+        - name: VNC_DISABLE_AUTH
+          value: "true"
+        - name: VNC_ALLOW_CLIENT_TO_OVERRIDE_VNC_SETTINGS
+          value: "true"
+        volumeMounts:
+          - name: dshm
+            mountPath: /dev/shm
+{{container_vol_mounts}}
+        ports:
+        - containerPort: 6901
+        - containerPort: 8085
+{{gpu_toleration}}

@@ -1,10 +1,10 @@
-FROM python:3.10.7-slim-buster
+FROM python:3.11-bookworm
 
-# docker build -t opendx/tslicerh .
+# docker build -t app-hub .
 #
 # (if it complains with:
-#  error checking context: no permission to read from '/home/rnebot/GoogleDrive/AA_OpenDx28/3dslicerhub/data/certificates/dhparam.pem'
-#  --> sudo chown -R rnebot data/
+#  error checking context: no permission to read from '.../data/certificates/dhparam.pem'
+#  --> sudo chown -R <user>> data/
 # )
 
 # NORMAL
@@ -25,7 +25,6 @@ RUN apt-get update && \
     libxslt-dev \
     zlib1g-dev \
     unzip \
-    python-pytest \
     && apt-get clean
 
 RUN curl -LO https://storage.googleapis.com/kubernetes-release/release/`curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt`/bin/linux/amd64/kubectl && \
@@ -34,8 +33,8 @@ RUN curl -LO https://storage.googleapis.com/kubernetes-release/release/`curl -s 
 
 # COMMON
 RUN pip3 install --no-cache-dir --upgrade pip && \
-    pip3 install --no-cache-dir git+https://github.com/Supervisor/supervisor gunicorn
-
+    pip3 install --no-cache-dir git+https://github.com/Supervisor/supervisor gunicorn && \
+	pip3 install --no-cache-dir python-jose[cryptography]
 WORKDIR /app
 
 RUN mkdir -p /srv
@@ -54,7 +53,11 @@ CMD ["supervisord", "-c", "/etc/supervisord.conf"]
 
 EXPOSE 8080
 
-COPY tsliceh_local.env /app/.env
-COPY users /app/user
+COPY app_hub_local.env /app/.env
 COPY proxy /app/proxy
-COPY tsliceh /app/tsliceh
+# The Jinja2 template for user-session Deployments. APP_MANIFEST_TEMPLATE resolves it relative to
+# WORKDIR /app, so it must be in the image: it is application code, not configuration. Deployments
+# that hostPath-mount the source tree over /app (see kubernetes/overlays/k3s-local) masked its
+# absence; anywhere else, the first session spawn died with FileNotFoundError.
+COPY app-deployment-template2.yaml /app/app-deployment-template2.yaml
+COPY apphub /app/apphub

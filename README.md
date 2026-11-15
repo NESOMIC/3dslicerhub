@@ -1,162 +1,62 @@
-# 3DSlicer Hub
-**3DSlicer Hub** is an application that replicates the functionality of **JupyterHub**, but for **3DSlicer**. It allows users to efficiently manage 3DSlicer instances, providing a login mechanism, the ability to launch and share instances, and integration with a reverse proxy for simplified access.
+# Slicer Hub (Nesomic)
 
-Unregistered users:
+Multi-user [3D Slicer](https://www.slicer.org/) sessions in the browser: the 3D Slicer counterpart of
+JupyterHub. A user signs in, the hub starts one 3D Slicer desktop for them (KasmVNC, from the
+[docker-slicer](https://github.com/NESOMIC/docker-slicer) image) and publishes it under
+`https://<hub host>/<session uuid>/` through its own nginx sidecar.
 
-user: free_user*
-password: test
+This branch (`nesomic`) is the adaptation to the Nesomic platform. It shares its code with
+[t4-hub](https://github.com/NESOMIC/t4-hub) (the same hub, evolved for Transformer4), from which the
+Kubernetes orchestrator, the Keycloak sign-in, the session guards and the Nesomic header were brought
+back. The original Docker Compose + LDAP deployment is in the `main` and `develop` branches.
 
-## Prerequisites
+## How it works
 
-- Python 3.7 or higher
-- Docker
+- **Sign-in**: "Continue with Google", through the Nesomic Keycloak realm (`USE_KEYCLOAK=true`,
+  client `nesomic-hub`) or Google OAuth directly.
+- **Authorization**: the hub asks the platform for the user's roles
+  (`GET ${NEXTGENDEM_BASE_URL}/api/user_roles?email=...`). `APP_ROLE` (default `3dslicer`) or
+  `sys-admin` may open a session; `APP_ADMIN_ROLE` (default `3dslicer-admin`) or `sys-admin` also
+  manage other people's sessions.
+- **Sessions**: one Deployment per user, rendered from `app-deployment-template2.yaml` (or the file
+  named by `APP_MANIFEST_TEMPLATE`) and applied with `kubectl`. Pods carry the label
+  `app=${APP_LABEL}` (default `slicer`). Sessions without CPU activity for `INACTIVITY_TIME_SEC`
+  are removed; documents live in `/home/kasm-user/Documents`.
+- **Sharing**: a session can be shared read-only or interactive from its management page.
 
-A. Docker Compose Orchestrator
-- Docker Compose
+## Configuration
 
-B. Kubernetes Orchestrator
-- Minikube
+Read from the environment, or from the file named by `ENV_FILE` (`app_hub_local.env` is the
+template, with comments). Variables specific to this hub:
 
-## Installation
+| Variable | Default | Meaning |
+|---|---|---|
+| `APP_ROLE` / `APP_ADMIN_ROLE` | `3dslicer` / `3dslicer-admin` | platform roles for users / session admins |
+| `APP_LABEL` | `slicer` | `app` label of session pods |
+| `APP_IMAGE_NAME` / `APP_IMAGE_TAG` | `slicer` / `latest` | session image |
+| `SESSION_CPU_REQUESTED` / `SESSION_CPU_LIMIT` | `1` / `4` | per-session CPU |
+| `SESSION_MEM_REQUESTED` / `SESSION_MEM_LIMIT` | `2Gi` / `8Gi` | per-session memory |
+| `SESSION_GPU` | `false` | request one `nvidia.com/gpu` per session |
+| `MAX_SESSIONS`, `INACTIVITY_TIME_SEC` | | capacity and idle culling |
 
-### Running with Docker Compose
+### GPU
 
-Requirements:
+3D Slicer uses the GPU for rendering, not for computation. Without one it renders in software
+(Mesa llvmpipe): slice views are fine, volume rendering is slow. With `SESSION_GPU=true` each
+session requests `nvidia.com/gpu: 1` and tolerates the `nvidia.com/gpu` taint. That unit does not
+have to be a whole card: with the NVIDIA device plugin configured for time-slicing, one small GPU
+(for example a T4) is advertised as several `nvidia.com/gpu` and shared by as many sessions.
 
-Docker must be correctly installed
-
-__!!! Make sure the file `tsliceh_local.env` contains the variable:__
-CONTAINER_ORCHESTRATOR="docker_compose"
-
-1. Build the VNC version of 3D Slicer used for each session:
-
-```bash
-docker build -t vnc-base https://github.com/OpenDx28/docker-vnc-base.git#:src
-```
-
-2. Run Docker Compose to start the environment:
-
-```bash
-docker-compose up -d
-```
-
-## Running the code locally - Docker Compose (for Debugging)
-
-__!!! Make sure the `.env` file contains the variable:__
-CONTAINER_ORCHESTRATOR="docker_compose"
-
-In the `.env` file, change the project path `SCRIPT_DIR="/path/to/project/3dslicerhub"` to the local path to the project.
-
-Run Docker Compose, but only the proxy and openldap services, executing:
-
-```bash
-docker compose up -d openldap proxy
-```
-
-Run `main.py` in debugging mode.
-
-The service will be available at `localhost:8000`.
-
-To access the session without LDAP, use any user starting with __free_user__ and password __test__.
-
-### Running with Kubernetes
-
-__The variable `CONTAINER_ORCHESTRATOR="docker_compose"` in the `.env` file must be commented out__.
-
-## Minikube (locally)
-
-1. **Start the Docker registry** (only once):
-Registry Docker container [Docker Registry](https://hub.docker.com/_/registry) is a Distribution implementation for storing and distributing container images and artifacts that allows using locally built Docker images in Kubernetes.
+## Build
 
 ```bash
-docker run -d -p 5000:5000 --restart=always --name registry registry:2
+docker build -t slicer-hub .
 ```
 
-2. Build and push the 3DSlicer Hub image to the Docker registry:
+The session image is built from https://github.com/NESOMIC/docker-slicer.
 
-```bash
-docker build -t localhost:5000/opendx28/tslicerh .
-docker push localhost:5000/opendx28/tslicerh
-```
+## Deployment
 
-3. Build the VNC version of 3D Slicer and push it to the Docker registry:
-
-```bash
-docker build -t vnc-base https://github.com/OpenDx28/docker-vnc-base.git#:src
-docker build -t localhost:5000/opendx28/slicer --build-arg BASE_IMAGE="vnc-base:latest" https://github.com/OpenDx28/docker-slicer.git#:src
-docker push localhost:5000/opendx28/slicer
-```
-
-4. Start Minikube, clean other pods or deployments, and access the Minikube Docker environment:
-
-```bash
-minikube start
-cd /path/to/your/project/3dslicerhub
-kubectl delete -f tsliceh/kubernetes/tdsh.yaml
-kubectl delete deployments -l app=slicer
-eval $(minikube docker-env)
-```
-
-5. Unset access to the Minikube Docker environment and apply the manifests:
-
-```bash
-eval $(minikube docker-env --unset)
-kubectl apply -f /path/to/your/project/3dslicerhub/tsliceh/kubernetes/tdsh.yaml
-```
-
-### Running in a Private Cluster
-
-1. Install Kubernetes in your cluster.
-2. If you are going to use Docker registry, repeat steps 1, 2, and 3 (above) on every node.
-3. Apply Manifests:
-
-```bash
-kubectl apply -f /path/to/your/project/3dslicerhub/tsliceh/kubernetes/teide_tdsh.yaml
-```
-
-Note that in this development environment case, the `imagePullPolicy` in the pod manifest must be set to __Always__ to get the new image each time it is built.
-
-## Features
-
-- **Login:** Provides a login page connected to an LDAP server.
-- **Launching 3DSlicer Instances:** Allows users to start 3DSlicer instances with specific configurations in the future.
-- **Instance Management:** Ability to stop unused 3DSlicer instances.
-- **Integration with a Reverse Proxy:** Provides a single entry point for users.
-- **Sharing Instances:** Facilitates sharing of 3DSlicer instances among users.
-- **Persistent Storage:** Offers persistent storage for new container instances.
-
-## Documentation
-
-For more information about the libraries used, check:
-
-- [docker-py](https://docker-py.readthedocs.io/en/stable/)
-- [FastAPI](https://fastapi.tiangolo.com/)
-
-## Contributions
-
-Contributions are welcome. If you wish to collaborate, please open an **issue** or a **pull request**.
-
-## License
-
-This project is licensed under the MIT License. For more details, please refer to the `LICENSE` file.
-
-# Code Organization:
-
-## Class Orchestrator
-
-The **Orchestrator** is a critical component of the 3DSlicer Hub that manages the lifecycle of container instances running 3DSlicer. It abstracts the details of container management, allowing the application to interact with Docker and Kubernetes seamlessly.
-
-### Key Features of the Orchestrator:
-
-- **Container Lifecycle Management**: The orchestrator handles the creation, starting, stopping, and removal of container instances. This allows users to launch new 3DSlicer sessions and manage existing ones efficiently.
-
-- **Support for Multiple Backends**: The orchestrator supports both Docker and Kubernetes as orchestration backends. This flexibility allows users to deploy the application in different environments depending on their needs and infrastructure.
-
-- **Interface Definition**: The orchestrator is defined using an abstract class (`IContainerOrchestrator`) that outlines essential methods for container management, such as `start_container`, `stop_container`, and `get_container_status`. Concrete implementations (e.g., `DockerCompose` and `Kubernetes`) provide specific logic for each orchestration method.
-
-- **Asynchronous Operations**: The orchestrator employs asynchronous programming patterns, particularly when starting containers and waiting for their readiness. This ensures that the application remains responsive while managing multiple containers concurrently.
-
-- **Volume Management**: The orchestrator also manages persistent storage volumes, allowing user data to be retained across container restarts. This is crucial for maintaining the state of 3DSlicer sessions.
-
-By encapsulating the complexities of container management, the orchestrator allows the rest of the application to focus on providing a smooth user experience and managing sessions, rather than dealing with low-level container operations.
-
+The Kubernetes manifests (hub Deployment with the nginx sidecar, RBAC, Ingress, session
+NetworkPolicy, per-environment overlays) are in the platform's infrastructure repository
+(`nsm-sys`, `kustomize/base/slicer-hub`).

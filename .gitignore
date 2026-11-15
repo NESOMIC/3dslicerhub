@@ -5,15 +5,16 @@ data/certificates/
 
 proxy/nginx.conf
 
-tsliceh/templates/index.html
+apphub/templates/index.html
 
 data/
 restar4testing.sh
 
 .devcontainer/
 
-tsliceh/logs
+apphub/logs
 
 *.log
 .env
 *.ipynb
+**/secrets.yaml

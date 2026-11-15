@@ -28,6 +28,7 @@ class GUID(TypeDecorator):
             return str(value)
         else:
             if not isinstance(value, uuid.UUID):
+                print(value)
                 return "%.32x" % uuid.UUID(value).int
             else:
                 # hexstring
@@ -49,12 +50,13 @@ class Base(object):
 SQLAlchemyBase = declarative_base(cls=Base)
 
 
-class Session3DSlicer(SQLAlchemyBase):
+class AppSession(SQLAlchemyBase):
     __tablename__ = "sessions"
     uuid = Column(GUID, nullable=False, primary_key=True)
     created_at = Column(DateTime, default=datetime.datetime.now())
     last_activity = Column(DateTime, nullable=True)
     user = Column(String(64), unique=True, nullable=False)
+    email = Column(String(64), unique=True, nullable=False)
     url_path = Column(String(1024), nullable=True)
     service_address = Column(String(1024), nullable=True)
     container_name = Column(String(128), nullable=True)
@@ -95,75 +97,59 @@ def create_tables(engine_, declarative_base_=SQLAlchemyBase):
         declarative_base_.metadata.create_all()
 
 
-def get_ldap_address(mode, openldap_name, net_id):
-    if mode == "container":
-        from tsliceh.orchestrators import get_container_ip
-        ldap_adress = get_container_ip(openldap_name, net_id) + ":389"
-    else:
-        ldap_adress = "localhost:389"
-    return ldap_adress
-
-
 def get_domain_name(mode, domain_name, port=None):
     from dotenv import load_dotenv
-    if mode == "local":
-        return domain_name + f":{port if port is not None else 8000}"
+    import socket
+
+    # Try to detect the host IP if domain is not configured or set to localhost
+    if not domain_name or domain_name == "detect":
+        # 1. Try HOST_IP environment variable (Downward API - fastest and preferred)
+        detected_ip = os.getenv("HOST_IP")
+        if detected_ip:
+            print(f"DEBUG: Detected IP from HOST_IP: {detected_ip}")
+
+        # 2. Try kubectl if POD_NAME is set (accurate for dynamic IP if Downward API is missing)
+        if not detected_ip:
+            pod_name = os.getenv("POD_NAME")
+            if pod_name:
+                try:
+                    # The pod has RBAC for this (internal-kubectl service account)
+                    with os.popen(f"kubectl get pod {pod_name} -o jsonpath='{{.status.hostIP}}'") as f:
+                        detected_ip = f.read().strip()
+                        if detected_ip:
+                            print(f"DEBUG: Detected IP from kubectl: {detected_ip}")
+                except Exception:
+                    pass
+
+        # 3. Fallback to socket detection
+        if not detected_ip:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                detected_ip = s.getsockname()[0]
+                s.close()
+                if detected_ip:
+                    print(f"DEBUG: Detected IP from socket: {detected_ip}")
+            except Exception:
+                pass
+
+        if detected_ip and not detected_ip.startswith("127."):
+            domain_name = detected_ip
+
+    if mode == "local" or mode == "container":
+        return (domain_name or "localhost") + f":{port if port is not None else 8000}"
     else:
-        externalIP  = os.popen('curl -s ifconfig.me').readline()
-        print(externalIP)
-        load_dotenv()
-        if externalIP == os.getenv("IP"):
-            return os.getenv("DOMAIN")
-        else:
-            return "localhost"
+        # Check for external IP (production mode)
+        try:
+            with os.popen('curl -s ifconfig.me') as f:
+                externalIP = f.read().strip()
+            load_dotenv()
+            if externalIP and externalIP == os.getenv("IP"):
+                return os.getenv("DOMAIN", "detect") or domain_name or "localhost"
+        except Exception:
+            pass
 
+        return domain_name or "localhost"
 
-# def connect_ldap_server(ldap_adress):
-#     """
-#     https://medium.com/analytics-vidhya/crud-operations-for-openldap-using-python-ldap3-46393e3122af
-#     :param ldap_adress:
-#     :return:
-#     """
-#     try:
-#
-#         # Provide the hostname and port number of the openLDAP
-#         # TODO FIND ldap ip
-#         server_uri = ldap_adress
-#         server = Server(server_uri, get_info=ALL)
-#         # username and password can be configured during openldap setup
-#         connection = Connection(server,
-#                                 user='cn=admin,dc=opendx,dc=org',
-#                                 password="admin_pass")
-#         bind_response = connection.bind()  # Returns True or False
-#     except LDAPBindError as e:
-#         connection = e
-#         return connection
-#
-#
-# #
-# # # For groups provide a groupid number instead of a uidNumber
-# def get_ldap_users(ldap_adress):
-#     """
-#     https://medium.com/analytics-vidhya/crud-operations-for-openldap-using-python-ldap3-46393e3122af
-#     :return:
-#     :ldap_adress: interal IP of the container
-#     """
-#     # Provide a search base to search for.
-#     search_base = 'dc=testldap,dc=com'
-#     # provide a uidNumber to search for. '*" to fetch all users/groups
-#     search_filter = '(uidNumber=500)'
-#
-#     # Establish connection to the server
-#     ldap_conn = connect_ldap_server(ldap_adress)
-#     try:
-#         # only the attributes specified will be returned
-#         ldap_conn.searchsearch('dc=opendx,dc=org', '(uid=*)',
-#                                attributes=['sn', 'cn', 'homeDirectory'],
-#                                size_limit=0)
-#         # search will not return any values.
-#         # the entries method in connection object returns the results
-#         results = ldap_conn.entries
-#     except LDAPException as e:
-#         results = e
 
 
