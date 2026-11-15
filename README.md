@@ -61,6 +61,11 @@ The Kubernetes manifests (hub Deployment with the nginx sidecar, RBAC, Ingress, 
 NetworkPolicy, per-environment overlays) are in the platform's infrastructure repository
 (`nsm-sys`, `kustomize/base/slicer-hub`).
 
-## License
+## License, authors and funding
 
-BSD 3-Clause License, the same as the rest of the NEXTGENDEM / NESOMIC platform. See `LICENSE`.
+BSD 3-Clause License, the same as the rest of the NESOMIC platform: see `LICENSE`. Copyright
+belongs to the NESOMIC authors listed in `AUTHORS`.
+
+Developed within the NEXTGENDEM project (https://www.nextgendem.eu), funded by the Interreg MAC
+2014-2020 Cooperation Programme (project code MAC2/4.6d/236), and continued under a commission
+from the Cabildo de Gran Canaria.
