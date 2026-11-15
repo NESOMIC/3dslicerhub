@@ -60,3 +60,7 @@ The session image is built from https://github.com/NESOMIC/docker-slicer.
 The Kubernetes manifests (hub Deployment with the nginx sidecar, RBAC, Ingress, session
 NetworkPolicy, per-environment overlays) are in the platform's infrastructure repository
 (`nsm-sys`, `kustomize/base/slicer-hub`).
+
+## License
+
+BSD 3-Clause License, the same as the rest of the NEXTGENDEM / NESOMIC platform. See `LICENSE`.
